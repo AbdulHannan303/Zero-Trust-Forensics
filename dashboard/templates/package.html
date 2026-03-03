@@ -1,0 +1,106 @@
+{% extends "base.html" %}
+{% block title %}Evidence Package{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">📦 Forensic Evidence Package</h2>
+
+<div class="row g-4">
+
+  <!-- ── Package contents description ──────────────────────────────────── -->
+  <div class="col-md-6">
+    <div class="card p-4 h-100">
+      <h5 class="mb-3">📋 Package Contents</h5>
+      <p class="text-secondary mb-4">
+        The evidence package is a cryptographically verifiable ZIP archive
+        containing complete chain-of-custody documentation.  It is designed
+        to be submitted as digital forensic evidence.
+      </p>
+
+      <ul class="list-unstyled">
+        <li class="mb-3">
+          <span style="font-size:1.3rem">📄</span>
+          <strong class="ms-2">evidence_records.json</strong>
+          <p class="text-secondary ms-4 mb-0" style="font-size:0.85rem">
+            All access decisions with full context: user, resource, action,
+            IP address, risk score, and policy reason.
+          </p>
+        </li>
+        <li class="mb-3">
+          <span style="font-size:1.3rem">🔗</span>
+          <strong class="ms-2">hash_chain_verification.json</strong>
+          <p class="text-secondary ms-4 mb-0" style="font-size:0.85rem">
+            Per-record hash verification results showing stored vs computed
+            hashes — instantly reveals any tampering.
+          </p>
+        </li>
+        <li class="mb-3">
+          <span style="font-size:1.3rem">📋</span>
+          <strong class="ms-2">chain_of_custody.json</strong>
+          <p class="text-secondary ms-4 mb-0" style="font-size:0.85rem">
+            Package metadata: generation timestamp, system info, total records,
+            and a SHA-256 hash of the entire evidence set.
+          </p>
+        </li>
+        <li class="mb-3">
+          <span style="font-size:1.3rem">📊</span>
+          <strong class="ms-2">forensic_report.html</strong>
+          <p class="text-secondary ms-4 mb-0" style="font-size:0.85rem">
+            Self-contained HTML report with executive summary, evidence
+            tables, hash verification status, and methodology section.
+            Open in any browser — no internet needed.
+          </p>
+        </li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- ── Download section ───────────────────────────────────────────────── -->
+  <div class="col-md-6">
+    <div class="card p-4 h-100 d-flex flex-column">
+      <h5 class="mb-3">⬇️ Generate & Download</h5>
+      <p class="text-secondary">
+        Clicking the button below will generate a fresh package containing
+        all current evidence records and their hash-chain verification status.
+      </p>
+
+      <div class="text-center my-4">
+        <a href="/api/package"
+           class="btn btn-success btn-lg px-5 py-3"
+           id="download-btn"
+           onclick="onDownload()">
+          📦 Download Evidence Package
+        </a>
+      </div>
+
+      <div id="package-info" style="display:none" class="mt-3">
+        <div class="card p-3" style="background:rgba(0,184,148,0.1);border-color:#00b894">
+          <h6 style="color:#00b894">✅ Package Generated</h6>
+          <p class="text-secondary mb-0" style="font-size:0.85rem">
+            Your download should start automatically.  The ZIP file contains
+            a complete forensic record — store it securely.
+          </p>
+        </div>
+      </div>
+
+      <!-- Methodology note -->
+      <div class="mt-auto pt-4 border-top" style="border-color:#0f3460!important">
+        <h6 class="text-secondary">🔐 Hash Chain Integrity</h6>
+        <p class="text-secondary mb-0" style="font-size:0.8rem">
+          Every record's SHA-256 hash covers all its fields plus the hash
+          of the previous record.  Modifying any record — or the order of
+          records — immediately breaks the chain, proving tampering.
+        </p>
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function onDownload() {
+  document.getElementById('package-info').style.display = 'block';
+}
+</script>
+{% endblock %}

@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}Verify Integrity{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">🔍 Hash Chain Integrity Verification</h2>
+
+<!-- ── Action buttons ─────────────────────────────────────────────────────── -->
+<div class="text-center mb-4">
+  <button class="btn btn-primary btn-lg px-5 me-3" onclick="verifyChain()">
+    🔍 Verify Hash Chain Integrity
+  </button>
+  <button class="btn btn-warning btn-lg px-4" onclick="showTamperSection()">
+    ⚠️ Tamper a Record <small>(Demo Only)</small>
+  </button>
+</div>
+
+<!-- ── Tamper section (hidden by default) ────────────────────────────────── -->
+<div id="tamper-section" class="card p-4 mb-4" style="display:none">
+  <h5 class="text-warning">⚠️ Demo Tamper Tool</h5>
+  <p class="text-secondary">
+    Select a record and click Tamper. This changes the stored decision
+    <strong>without</strong> updating the hash — breaking the chain.
+    Then click Verify to see it highlighted in red.
+  </p>
+  <div class="d-flex gap-2 align-items-center flex-wrap">
+    <select class="form-select" id="tamper-select" style="max-width:420px">
+      <option value="">Loading records…</option>
+    </select>
+    <button class="btn btn-danger" onclick="tamperSelected()">💥 Tamper This Record</button>
+  </div>
+  <div id="tamper-result" class="mt-2"></div>
+</div>
+
+<!-- ── Results section (hidden until verify is clicked) ──────────────────── -->
+<div id="results-section" style="display:none">
+
+  <!-- Chain status banner -->
+  <div id="chain-banner" class="mb-4"></div>
+
+  <!-- Summary -->
+  <p id="chain-summary" class="text-center text-secondary mb-4"></p>
+
+  <!-- Detailed verification table -->
+  <div class="card p-3">
+    <h5 class="mb-3">📋 Record-by-Record Verification</h5>
+    <div class="table-responsive">
+      <table class="table align-middle">
+        <thead>
+          <tr>
+            <th>Record ID</th>
+            <th>Timestamp</th>
+            <th>User</th>
+            <th>Decision</th>
+            <th>Stored Hash</th>
+            <th>Computed Hash</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="verify-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function verifyChain() {
+  const section = document.getElementById('results-section');
+  const tbody   = document.getElementById('verify-tbody');
+  tbody.innerHTML = '<tr><td colspan="7" class="text-center text-secondary">⏳ Verifying…</td></tr>';
+  section.style.display = 'block';
+  section.scrollIntoView({ behavior: 'smooth' });
+
+  try {
+    const res  = await fetch('/api/verify');
+    const data = await res.json();
+    renderVerification(data);
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-danger">Error: ${e.message}</td></tr>`;
+  }
+}
+
+function renderVerification(data) {
+  const summary = data.summary || {};
+  const records = data.records || [];
+
+  // ── Banner ───────────────────────────────────────────────────────────────
+  const banner = document.getElementById('chain-banner');
+  if (summary.chain_intact) {
+    banner.innerHTML = `<div class="chain-intact">✅ CHAIN INTEGRITY: INTACT</div>`;
+  } else {
+    banner.innerHTML = `<div class="chain-broken">❌ CHAIN INTEGRITY: BROKEN — TAMPERING DETECTED!</div>`;
+  }
+
+  // ── Summary line ─────────────────────────────────────────────────────────
+  document.getElementById('chain-summary').textContent =
+    `${summary.valid_count} of ${summary.total} records verified successfully` +
+    (summary.tampered_count ? ` — ${summary.tampered_count} TAMPERED` : '');
+
+  // ── Table rows ────────────────────────────────────────────────────────────
+  const tbody = document.getElementById('verify-tbody');
+  if (!records.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="text-secondary text-center">No records yet.</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = records.map(r => {
+    const rowClass = r.valid ? '' : 'tampered-row';
+    const status   = r.valid
+      ? '<span style="color:#00b894">✅ Valid</span>'
+      : '<span style="color:#e94560;font-weight:bold">❌ TAMPERED!</span>';
+    const storedMatch = r.stored_hash === r.computed_hash;
+
+    return `<tr class="${rowClass}">
+      <td class="hash-text" style="font-size:0.75rem" title="${r.record_id}">${r.record_id.slice(0,8)}…</td>
+      <td style="font-size:0.8rem">${(r.timestamp||'').slice(0,19).replace('T',' ')}</td>
+      <td>${r.user}</td>
+      <td>${r.decision}</td>
+      <td class="hash-text" style="font-size:0.7rem" title="${r.stored_hash}">${(r.stored_hash||'').slice(0,16)}…</td>
+      <td class="hash-text" style="font-size:0.7rem;color:${storedMatch?'#fdcb6e':'#e94560'}"
+          title="${r.computed_hash}">${(r.computed_hash||'').slice(0,16)}…</td>
+      <td>${status}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ── Tamper section ────────────────────────────────────────────────────────
+async function showTamperSection() {
+  const sec = document.getElementById('tamper-section');
+  sec.style.display = sec.style.display === 'none' ? 'block' : 'none';
+  if (sec.style.display === 'block') {
+    await populateTamperSelect();
+  }
+}
+
+async function populateTamperSelect() {
+  const sel = document.getElementById('tamper-select');
+  try {
+    const res     = await fetch('/api/records');
+    const records = await res.json();
+    sel.innerHTML = records.map(r =>
+      `<option value="${r.record_id}">
+        ${r.record_id.slice(0,8)}… | ${r.user} | ${r.policy_decision} | ${(r.timestamp||'').slice(0,19)}
+      </option>`
+    ).join('');
+  } catch(e) {
+    sel.innerHTML = '<option>Error loading records</option>';
+  }
+}
+
+async function tamperSelected() {
+  const sel    = document.getElementById('tamper-select');
+  const id     = sel.value;
+  const result = document.getElementById('tamper-result');
+  if (!id) { result.innerHTML = '<span class="text-warning">Please select a record.</span>'; return; }
+
+  result.innerHTML = '<span class="text-secondary">⏳ Tampering…</span>';
+  try {
+    const res  = await fetch(`/api/tamper/${id}`, { method: 'POST' });
+    const data = await res.json();
+    result.innerHTML = `<span class="text-danger">💥 ${data.message || 'Record tampered!'}</span>
+      <br><small class="text-secondary">Now click "Verify Hash Chain Integrity" to see the broken chain.</small>`;
+    // Auto-verify after 1 second so the user can see the effect immediately
+    setTimeout(verifyChain, 1000);
+  } catch(e) {
+    result.innerHTML = `<span class="text-danger">Error: ${e.message}</span>`;
+  }
+}
+</script>
+{% endblock %}
