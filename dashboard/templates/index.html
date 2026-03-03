@@ -1,0 +1,242 @@
+{% extends "base.html" %}
+{% block title %}Live Monitor{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">📊 Live Access Monitor</h2>
+
+<!-- ── Stats row ──────────────────────────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-6 col-md-3">
+    <div class="card stat-card">
+      <div class="stat-number text-info" id="stat-total">—</div>
+      <div class="text-secondary">Total Decisions</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card stat-card">
+      <div class="stat-number text-success" id="stat-allowed">—</div>
+      <div class="text-secondary">Allowed</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card stat-card">
+      <div class="stat-number text-danger" id="stat-denied">—</div>
+      <div class="text-secondary">Denied</div>
+    </div>
+  </div>
+  <div class="col-6 col-md-3">
+    <div class="card stat-card">
+      <div class="stat-number" id="stat-risk">—</div>
+      <div class="text-secondary">Avg Risk Score</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── Charts row ─────────────────────────────────────────────────────────── -->
+<div class="row g-3 mb-4">
+  <div class="col-md-4">
+    <div class="card p-3">
+      <h6 class="text-secondary mb-3">Allow vs Deny</h6>
+      <canvas id="doughnutChart" height="200"></canvas>
+    </div>
+  </div>
+  <div class="col-md-8">
+    <div class="card p-3">
+      <h6 class="text-secondary mb-3">Risk Scores Over Time</h6>
+      <canvas id="lineChart" height="120"></canvas>
+    </div>
+  </div>
+</div>
+
+<!-- ── Simulate buttons ───────────────────────────────────────────────────── -->
+<div class="card p-4 mb-4">
+  <h5 class="mb-3">🎮 Simulate Access Events</h5>
+  <div class="d-flex flex-wrap gap-3">
+    <button class="btn-simulate-normal btn" onclick="simulate('normal')">
+      🟢 Simulate Normal Access
+    </button>
+    <button class="btn-simulate-attack btn" onclick="simulate('attack')">
+      🔴 Simulate Attack
+    </button>
+    <button class="btn-simulate-insider btn" onclick="simulate('insider')">
+      🟠 Simulate Insider Threat
+    </button>
+    <button class="btn btn-secondary" onclick="refreshData()">
+      🔄 Refresh Data
+    </button>
+  </div>
+  <div id="sim-result" class="mt-3"></div>
+</div>
+
+<!-- ── Live feed table ────────────────────────────────────────────────────── -->
+<div class="card p-3">
+  <h5 class="mb-3">📋 Live Evidence Feed</h5>
+  <div class="table-responsive">
+    <table class="table table-hover align-middle">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>User</th>
+          <th>Resource</th>
+          <th>Risk Score</th>
+          <th>Decision</th>
+          <th>Reason</th>
+        </tr>
+      </thead>
+      <tbody id="records-tbody">
+        <tr><td colspan="6" class="text-center text-secondary">Loading…</td></tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// ── Chart instances ────────────────────────────────────────────────────────
+const doughnutCtx = document.getElementById('doughnutChart').getContext('2d');
+const lineCtx     = document.getElementById('lineChart').getContext('2d');
+
+const doughnutChart = new Chart(doughnutCtx, {
+  type: 'doughnut',
+  data: {
+    labels: ['Allow', 'Deny'],
+    datasets: [{
+      data: [0, 0],
+      backgroundColor: ['#00b894', '#e94560'],
+      borderWidth: 0,
+    }]
+  },
+  options: { plugins: { legend: { labels: { color: '#e0e0e0' } } } }
+});
+
+const lineChart = new Chart(lineCtx, {
+  type: 'line',
+  data: {
+    labels: [],
+    datasets: [{
+      label: 'Risk Score',
+      data: [],
+      borderColor: '#fdcb6e',
+      backgroundColor: 'rgba(253,203,110,0.1)',
+      tension: 0.3,
+      fill: true,
+    }]
+  },
+  options: {
+    scales: {
+      x: { ticks: { color: '#a0a0a0', maxTicksLimit: 10 },
+           grid:  { color: 'rgba(255,255,255,0.05)' } },
+      y: { min: 0, max: 100,
+           ticks: { color: '#a0a0a0' },
+           grid:  { color: 'rgba(255,255,255,0.05)' } }
+    },
+    plugins: { legend: { labels: { color: '#e0e0e0' } } }
+  }
+});
+
+// ── Fetch and render ───────────────────────────────────────────────────────
+async function refreshData() {
+  try {
+    const [statsRes, recordsRes] = await Promise.all([
+      fetch('/api/stats'),
+      fetch('/api/records'),
+    ]);
+    const stats   = await statsRes.json();
+    const records = await recordsRes.json();
+    renderStats(stats);
+    renderCharts(stats, records);
+    renderTable(records.slice(0, 50));   // show latest 50
+  } catch(e) {
+    console.error('Refresh error:', e);
+  }
+}
+
+function renderStats(s) {
+  document.getElementById('stat-total').textContent   = s.total   ?? '—';
+  document.getElementById('stat-allowed').textContent = s.allowed ?? '—';
+  document.getElementById('stat-denied').textContent  = s.denied  ?? '—';
+  const risk = s.avg_risk_score ?? 0;
+  const el = document.getElementById('stat-risk');
+  el.textContent = risk;
+  el.className = 'stat-number ' + riskClass(risk);
+}
+
+function renderCharts(stats, records) {
+  doughnutChart.data.datasets[0].data = [stats.allowed ?? 0, stats.denied ?? 0];
+  doughnutChart.update();
+
+  // Most recent 30 records for line chart (oldest first)
+  const recent = [...records].reverse().slice(-30);
+  lineChart.data.labels   = recent.map(r => r.timestamp.slice(11, 19));
+  lineChart.data.datasets[0].data = recent.map(r => r.risk_score);
+  lineChart.update();
+}
+
+function renderTable(records) {
+  const tbody = document.getElementById('records-tbody');
+  if (!records.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="text-center text-secondary">No records yet — use the Simulate buttons above!</td></tr>';
+    return;
+  }
+  tbody.innerHTML = records.map(r => {
+    const badge   = r.policy_decision === 'ALLOW'
+      ? '<span class="badge-allow">ALLOW</span>'
+      : '<span class="badge-deny">DENY</span>';
+    const riskPct  = r.risk_score ?? 0;
+    const barColor = riskPct >= 70 ? '#e94560' : riskPct >= 50 ? '#fdcb6e' : '#00b894';
+    const bar = `<div style="background:#1a1a2e;border-radius:4px;height:8px;width:80px;display:inline-block;vertical-align:middle">
+                   <div style="background:${barColor};width:${riskPct}%;height:100%;border-radius:4px"></div>
+                 </div> <span class="${riskClass(riskPct)}">${riskPct}</span>`;
+    return `<tr>
+      <td style="font-size:0.8rem">${r.timestamp.slice(0,19).replace('T',' ')}</td>
+      <td>${r.user}</td>
+      <td style="font-size:0.8rem;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.resource}</td>
+      <td>${bar}</td>
+      <td>${badge}</td>
+      <td style="font-size:0.8rem;color:#a0a0a0">${r.policy_reason ?? ''}</td>
+    </tr>`;
+  }).join('');
+}
+
+function riskClass(score) {
+  if (score >= 70) return 'risk-high';
+  if (score >= 50) return 'risk-medium';
+  return 'risk-low';
+}
+
+// ── Simulate buttons ───────────────────────────────────────────────────────
+async function simulate(type) {
+  const el = document.getElementById('sim-result');
+  el.innerHTML = '<span class="text-secondary">⏳ Sending request…</span>';
+  try {
+    const res  = await fetch(`/api/simulate/${type}`, { method: 'POST' });
+    const data = await res.json();
+    const color = data.decision === 'ALLOW' ? '#00b894' : '#e94560';
+    el.innerHTML = `<div style="color:${color};font-weight:bold">
+      ${data.decision} — Risk: ${data.risk_score} | ${data.reason}
+      <br><small class="text-secondary hash-text">Hash: ${(data.record_hash||'').slice(0,32)}…</small>
+    </div>`;
+    setTimeout(refreshData, 500);  // refresh after short delay
+  } catch(e) {
+    el.innerHTML = '<span class="text-danger">Error: ' + e.message + '</span>';
+  }
+}
+
+// ── Auto-refresh every 5 seconds (with debounce to avoid pile-up) ─────────
+let refreshPending = false;
+
+async function safeRefresh() {
+  if (refreshPending) return;   // skip if a request is already in flight
+  refreshPending = true;
+  try {
+    await refreshData();
+  } finally {
+    refreshPending = false;
+  }
+}
+
+refreshData();
+setInterval(safeRefresh, 5000);
+</script>
+{% endblock %}

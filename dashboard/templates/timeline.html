@@ -1,0 +1,128 @@
+{% extends "base.html" %}
+{% block title %}Timeline{% endblock %}
+
+{% block content %}
+<h2 class="mb-4">📅 Access Timeline</h2>
+
+<!-- ── User filter ────────────────────────────────────────────────────────── -->
+<div class="card p-3 mb-4">
+  <div class="row align-items-center g-2">
+    <div class="col-auto">
+      <label class="form-label mb-0 text-secondary">Filter by user:</label>
+    </div>
+    <div class="col-auto">
+      <select class="form-select" id="user-filter" onchange="loadTimeline()">
+        <option value="">— All Users —</option>
+      </select>
+    </div>
+    <div class="col-auto">
+      <button class="btn btn-sm btn-outline-secondary" onclick="loadTimeline()">
+        🔄 Refresh
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- ── Timeline cards ─────────────────────────────────────────────────────── -->
+<div id="timeline-container">
+  <p class="text-secondary text-center">Loading timeline…</p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+let allRecords = [];
+
+async function init() {
+  const res = await fetch('/api/records');
+  allRecords = await res.json();
+
+  // Populate user dropdown with unique users
+  const users = [...new Set(allRecords.map(r => r.user))].sort();
+  const sel   = document.getElementById('user-filter');
+  users.forEach(u => {
+    const opt = document.createElement('option');
+    opt.value = u; opt.textContent = u;
+    sel.appendChild(opt);
+  });
+
+  renderTimeline(allRecords);
+}
+
+function loadTimeline() {
+  const user = document.getElementById('user-filter').value;
+  const data = user ? allRecords.filter(r => r.user === user) : allRecords;
+  // Sort oldest first for timeline display
+  renderTimeline([...data].sort((a, b) => a.timestamp.localeCompare(b.timestamp)));
+}
+
+function renderTimeline(records) {
+  const container = document.getElementById('timeline-container');
+  if (!records.length) {
+    container.innerHTML = '<p class="text-secondary text-center">No records found.</p>';
+    return;
+  }
+
+  container.innerHTML = records.map(r => {
+    const cls     = r.policy_decision === 'ALLOW' ? 'allow' : 'deny';
+    const badge   = r.policy_decision === 'ALLOW'
+      ? '<span class="badge-allow">ALLOW</span>'
+      : '<span class="badge-deny">DENY</span>';
+    const riskPct = r.risk_score ?? 0;
+    const barColor = riskPct >= 70 ? '#e94560' : riskPct >= 50 ? '#fdcb6e' : '#00b894';
+    const factors  = (r.risk_factors || []).join(', ') || 'None';
+
+    return `
+    <div class="timeline-card ${cls}">
+      <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+        <div>
+          <div class="text-secondary" style="font-size:0.8rem">
+            🕐 ${r.timestamp.slice(0,19).replace('T',' ')} UTC
+          </div>
+          <div class="mt-1">
+            <strong>${r.user}</strong>
+            <span class="text-secondary mx-1">→</span>
+            <code style="color:#74b9ff">${r.resource}</code>
+            <span class="text-secondary ms-1">(${r.action})</span>
+          </div>
+          <div class="mt-1 text-secondary" style="font-size:0.8rem">
+            📍 ${r.ip_address} &nbsp;|&nbsp; Risk factors: ${factors}
+          </div>
+        </div>
+        <div class="text-end">
+          ${badge}
+          <div class="mt-1 text-secondary" style="font-size:0.8rem">${r.policy_reason}</div>
+        </div>
+      </div>
+
+      <!-- Risk score bar -->
+      <div class="mt-2 d-flex align-items-center gap-2">
+        <span class="text-secondary" style="font-size:0.8rem">Risk:</span>
+        <div style="background:#0a0a1a;border-radius:4px;height:8px;flex:1;max-width:200px">
+          <div style="background:${barColor};width:${riskPct}%;height:100%;border-radius:4px"></div>
+        </div>
+        <span style="color:${barColor};font-size:0.85rem">${riskPct}</span>
+      </div>
+
+      <!-- Hash chain info -->
+      <div class="mt-2 d-flex gap-3 flex-wrap">
+        <div>
+          <span class="text-secondary" style="font-size:0.75rem">Hash: </span>
+          <span class="hash-text" style="font-size:0.75rem"
+                title="${r.record_hash}">${(r.record_hash||'').slice(0,16)}…</span>
+          <button class="btn btn-sm p-0 ms-1" style="font-size:0.7rem;color:#a0a0a0"
+                  onclick="navigator.clipboard.writeText('${r.record_hash}')">📋</button>
+        </div>
+        <div>
+          <span class="text-secondary" style="font-size:0.75rem">Prev: </span>
+          <span class="hash-text" style="font-size:0.75rem"
+                title="${r.previous_hash}">${(r.previous_hash||'').slice(0,16)}…</span>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+init();
+</script>
+{% endblock %}

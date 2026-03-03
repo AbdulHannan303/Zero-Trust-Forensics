@@ -1,0 +1,129 @@
+version: "3.8"
+
+networks:
+  ztforensics-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
+  minio_data:
+  policies:
+
+services:
+  # ─────────────────────────────────────────────
+  # OPA — Open Policy Agent (policy decision engine)
+  # ─────────────────────────────────────────────
+  opa:
+    image: openpolicyagent/opa:latest
+    container_name: opa
+    ports:
+      - "8181:8181"
+    volumes:
+      - ./policies:/policies
+    command:
+      - "run"
+      - "--server"
+      - "--addr=0.0.0.0:8181"
+      - "--set=decision_logs.console=true"
+      - "/policies"
+    networks:
+      - ztforensics-net
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8181/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────────
+  # PostgreSQL — evidence records database
+  # ─────────────────────────────────────────────
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-ztforensics}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ztforensics_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-forensics_db}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - ztforensics-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-ztforensics}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────────
+  # MinIO — immutable evidence blob storage (S3-compatible)
+  # ─────────────────────────────────────────────
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minio_admin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minio_secret_key}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+    networks:
+      - ztforensics-net
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────────
+  # API Gateway — FastAPI Zero Trust policy gateway
+  # ─────────────────────────────────────────────
+  api-gateway:
+    build:
+      context: ./api_gateway
+      dockerfile: Dockerfile
+    container_name: api-gateway
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ztforensics}:${POSTGRES_PASSWORD:-ztforensics_secret}@postgres:5432/${POSTGRES_DB:-forensics_db}
+      OPA_URL: http://opa:8181
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-minio_admin}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-minio_secret_key}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      opa:
+        condition: service_healthy
+    networks:
+      - ztforensics-net
+    restart: on-failure
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+
+  # ─────────────────────────────────────────────
+  # Dashboard — Flask web UI
+  # ─────────────────────────────────────────────
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+    container_name: dashboard
+    environment:
+      API_GATEWAY_URL: http://api-gateway:8000
+    ports:
+      - "5000:5000"
+    depends_on:
+      api-gateway:
+        condition: service_healthy
+    networks:
+      - ztforensics-net
+    restart: on-failure
